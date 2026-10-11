@@ -3,10 +3,14 @@
 # Started from moodle-plugin-ci's own gha.dist.yml; only the matrix, the
 # database images, the Behat web server and the artifact name differ.
 #
-# The plugin supports Moodle 5.1 only (version.php: $plugin->supported = [501, 501]).
-# For MOODLE_501_STABLE the environment.xml minimums are PHP 8.2, PostgreSQL 15
-# and MariaDB 10.11, and core's own push.yml tests PHP 8.2 (lowest) to 8.4
-# (highest). Recheck all of that when adding a branch.
+# The plugin supports Moodle 5.1 to 5.3 (version.php: $plugin->supported = [501, 503]).
+# Each branch runs on PHP 8.4 only (the highest PHP all three support), on both
+# databases, with the database at the minimum its environment.xml requires:
+#   MOODLE_501_STABLE: PostgreSQL 15, MariaDB 10.11 (PHP 8.2 to 8.4 supported)
+#   MOODLE_502_STABLE: PostgreSQL 16, MariaDB 10.11 (PHP 8.3 to 8.4 supported)
+#   MOODLE_503_STABLE: PostgreSQL 17, MariaDB 11.4 (PHP 8.3 to 8.4 supported)
+# (public/admin/environment.xml and .github/workflows/push.yml of each branch).
+# Recheck all of that when adding a branch.
 name: Moodle Plugin CI
 
 on: [push, pull_request]
@@ -20,7 +24,7 @@ jobs:
 
     services:
       postgres:
-        image: ${{ matrix.database == 'pgsql' && 'postgres:15' || '' }}
+        image: ${{ matrix.database == 'pgsql' && matrix.dbimage || '' }}
         env:
           POSTGRES_USER: 'postgres'
           POSTGRES_HOST_AUTH_METHOD: 'trust'
@@ -29,7 +33,7 @@ jobs:
         options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 3
 
       mariadb:
-        image: ${{ matrix.database == 'mariadb' && 'mariadb:10.11' || '' }}
+        image: ${{ matrix.database == 'mariadb' && matrix.dbimage || '' }}
         env:
           MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: '1'
           MYSQL_CHARACTER_SET_SERVER: "utf8mb4"
@@ -41,9 +45,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        php: ['8.2', '8.4']
-        moodle-branch: ['MOODLE_501_STABLE']
-        database: [pgsql, mariadb]
+        include:
+          - {php: '8.4', moodle-branch: 'MOODLE_501_STABLE', database: pgsql, dbimage: 'postgres:15'}
+          - {php: '8.4', moodle-branch: 'MOODLE_501_STABLE', database: mariadb, dbimage: 'mariadb:10.11'}
+          - {php: '8.4', moodle-branch: 'MOODLE_502_STABLE', database: pgsql, dbimage: 'postgres:16'}
+          - {php: '8.4', moodle-branch: 'MOODLE_502_STABLE', database: mariadb, dbimage: 'mariadb:10.11'}
+          - {php: '8.4', moodle-branch: 'MOODLE_503_STABLE', database: pgsql, dbimage: 'postgres:17'}
+          - {php: '8.4', moodle-branch: 'MOODLE_503_STABLE', database: mariadb, dbimage: 'mariadb:11.4'}
 
     steps:
       - name: Check out repository code
