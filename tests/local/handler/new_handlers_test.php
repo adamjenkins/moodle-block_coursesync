@@ -20,6 +20,7 @@ use advanced_testcase;
 use block_coursesync\activity_payload;
 use block_coursesync\external\get_activity;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
  * Round-trip tests for the folder, book, wiki, assignment and quiz handlers.
@@ -288,6 +289,61 @@ final class new_handlers_test extends advanced_testcase {
         $this->assertSame(0, (int) $copy->revealidentities);
 
         $this->assertContains('syncassignnosubmissions', $handler->notes($payload));
+    }
+
+    /**
+     * "Never reopen" from a Moodle 5.1 source becomes "until pass" with one
+     * attempt, as Moodle 5.2's own upgrade does, and "automatically" is kept.
+     *
+     * @param string $sent what the source site sends
+     * @param string $expected the reopen method of the copy
+     * @param int $expectedattempts the maximum attempts of the copy
+     */
+    #[DataProvider('reopen_method_provider')]
+    public function test_assign_reopen_method(string $sent, string $expected, int $expectedattempts): void {
+        global $DB;
+
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $source = $this->getDataGenerator()->create_course();
+        $target = $this->getDataGenerator()->create_course();
+        $assign = $this->getDataGenerator()->create_module('assign', [
+            'course' => $source->id,
+            'maxattempts' => -1,
+            'attemptreopenmethod' => 'manual',
+        ]);
+
+        // Moodle 5.2 cannot store 'none' any more, so the source's answer is
+        // edited to look like one from a 5.1 site that still has it.
+        $exported = get_activity::execute($assign->cmid);
+        foreach ($exported['settings'] as $i => $setting) {
+            if ($setting['name'] === 'attemptreopenmethod') {
+                $exported['settings'][$i]['value'] = $sent;
+            }
+        }
+        $payload = activity_payload::from_response($exported);
+
+        $cm = handler_registry::get('assign')->create_from_remote_data($target, $payload, 'coursesync-1');
+        $copy = $DB->get_record('assign', ['id' => $cm->instance], '*', MUST_EXIST);
+
+        $this->assertSame($expected, $copy->attemptreopenmethod);
+        $this->assertSame($expectedattempts, (int) $copy->maxattempts);
+    }
+
+    /**
+     * Reopen methods a source can send, and what the copy should end up with.
+     *
+     * @return array
+     */
+    public static function reopen_method_provider(): array {
+        return [
+            'never, from a 5.1 source' => ['none', 'untilpass', 1],
+            'something unknown' => ['sometimes', 'untilpass', 1],
+            'manually' => ['manual', 'manual', -1],
+            'automatically' => ['automatic', 'automatic', -1],
+            'until pass' => ['untilpass', 'untilpass', -1],
+        ];
     }
 
     /**

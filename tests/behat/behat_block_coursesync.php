@@ -477,6 +477,37 @@ class behat_block_coursesync extends behat_base {
     }
 
     /**
+     * Add a random question slot to a quiz.
+     *
+     * Moodle 5.2 can no longer make a 'random' question with the data
+     * generator, and 5.1's "quiz contains the following questions" step has no
+     * column for a random slot, so neither core step works on both. This adds
+     * the slot the way the quiz editor does, through the quiz structure.
+     *
+     * @Given /^quiz "(?P<quiz>[^"]*)" has a random question from category "(?P<category>[^"]*)" on page "(?P<page>\d+)"$/
+     * @param string $quiz the quiz name
+     * @param string $category the question category name
+     * @param int $page the quiz page to add it to
+     */
+    public function quiz_has_a_random_question_from_category(string $quiz, string $category, int $page) {
+        global $DB;
+
+        $quizid = $DB->get_field('quiz', 'id', ['name' => $quiz], MUST_EXIST);
+        $categoryid = $DB->get_field('question_categories', 'id', ['name' => $category], MUST_EXIST);
+
+        $structure = \mod_quiz\quiz_settings::create($quizid)->get_structure();
+        $structure->add_random_questions($page, 1, [
+            'filter' => [
+                'category' => [
+                    'jointype' => \core_question\local\bank\condition::JOINTYPE_DEFAULT,
+                    'values' => [$categoryid],
+                    'filteroptions' => ['includesubcategories' => false],
+                ],
+            ],
+        ]);
+    }
+
+    /**
      * Turn a question into one of a type this site does not have installed.
      *
      * Every core question type is supported, so the only question a sync

@@ -385,6 +385,31 @@ final class syncer_update_test extends advanced_testcase {
     }
 
     /**
+     * A fresh copy of a type never shown on the course page (a question bank)
+     * takes the old copy's set-up without being moved.
+     *
+     * Moodle 5.2's cmactions::move_before() refuses to move such a module
+     * wherever it is, so moving one made replacing a question bank fail.
+     */
+    public function test_a_question_bank_copy_takes_the_old_ones_setup(): void {
+        global $DB;
+
+        $old = $this->getDataGenerator()->create_module('qbank', ['course' => $this->course->id, 'name' => 'Old bank']);
+        $new = $this->getDataGenerator()->create_module('qbank', ['course' => $this->course->id, 'name' => 'New bank']);
+
+        copy_update::take_local_setup(
+            $DB->get_record('course_modules', ['id' => $old->cmid], '*', MUST_EXIST),
+            $DB->get_record('course_modules', ['id' => $new->cmid], '*', MUST_EXIST),
+            true
+        );
+
+        $this->assertSame(
+            (int) $DB->get_field('course_modules', 'section', ['id' => $old->cmid]),
+            (int) $DB->get_field('course_modules', 'section', ['id' => $new->cmid])
+        );
+    }
+
+    /**
      * An unchanged copy nobody has anything in, ticked anyway, is replaced
      * by a fresh copy where it stands.
      */

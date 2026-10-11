@@ -21,6 +21,7 @@ use core_external\external_function_parameters;
 use core_external\external_multiple_structure;
 use core_external\external_single_structure;
 use core_external\external_value;
+use block_coursesync\attempt_pull;
 use block_coursesync\local\gradebook;
 use mod_quiz\question\bank\qbank_helper;
 
@@ -163,7 +164,9 @@ class get_quiz_attempts extends external_api {
                 'slot' => (int) $slot->slot,
                 'page' => (int) $slot->page,
                 'maxmark' => (float) $slot->maxmark,
-                'qtype' => (string) $slot->qtype,
+                // A random slot is sent as 'random' on every Moodle version, so
+                // that a destination on any version can tell it apart.
+                'qtype' => attempt_pull::slot_type($slot->qtype, !empty($slot->random)),
             ];
         }
 

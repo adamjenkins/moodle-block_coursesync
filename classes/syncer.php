@@ -16,6 +16,7 @@
 
 namespace block_coursesync;
 
+use block_coursesync\local\compat;
 use block_coursesync\local\file_sync;
 use core\http_client;
 use block_coursesync\local\handler\activity_handler;
@@ -68,11 +69,15 @@ class syncer {
     public static function find_existing(int $courseid, int $remotecmid): int {
         global $DB;
 
-        return (int) $DB->get_field('course_modules', 'id', [
-            'course' => $courseid,
-            'idnumber' => self::build_idnumber($remotecmid),
-            'deletioninprogress' => 0,
-        ], IGNORE_MISSING);
+        // A course module with no instance is not an activity: it is what a
+        // failed copy left behind, and must not stop the activity being copied.
+        return (int) $DB->get_field_select(
+            'course_modules',
+            'id',
+            'course = :course AND idnumber = :idnumber AND deletioninprogress = 0 AND instance > 0',
+            ['course' => $courseid, 'idnumber' => self::build_idnumber($remotecmid)],
+            IGNORE_MISSING
+        );
     }
 
     /**
@@ -344,10 +349,18 @@ class syncer {
         }
 
         try {
-            return self::run_locked($blockinstanceid, $courseid, $full, $client, $only);
+            $result = self::run_locked($blockinstanceid, $courseid, $full, $client, $only);
         } finally {
             $lock->release();
         }
+
+        // Only now, with the run in the history and the lock released, so that
+        // a site showing developer messages cannot stop a run half way.
+        foreach ($result->diagnostics as $message) {
+            debugging($message, DEBUG_DEVELOPER);
+        }
+
+        return $result;
     }
 
     /**
@@ -465,8 +478,8 @@ class syncer {
             try {
                 self::sync_activity($course, $record, $token, $activity, $result, $client, $chosen, $linked, $owned);
             } catch (\Throwable $e) {
-                debugging('block_coursesync: unexpected failure on remote cmid ' . $activity->cmid . ': '
-                    . $e->getMessage(), DEBUG_DEVELOPER);
+                $result->add_diagnostic('block_coursesync: unexpected failure on remote cmid ' . $activity->cmid . ': '
+                    . $e->getMessage());
 
                 $result->add_failed($activity->name, $activity->modname, $activity->cmid, 'errorcreatefailed');
             }
@@ -754,14 +767,14 @@ class syncer {
                 copy_update::set_identity((int) $cm->id, $idnumber);
 
                 // Last, so that nothing after it can fail and leave neither copy.
-                \course_delete_module($existingcmid);
+                compat::delete_module($existingcmid);
             }
         } catch (\Throwable $e) {
-            debugging('block_coursesync: could not update ' . $payload->modname . ' from remote cmid '
-                . $activity->cmid . ': ' . $e->getMessage(), DEBUG_DEVELOPER);
+            $result->add_diagnostic('block_coursesync: could not update ' . $payload->modname . ' from remote cmid '
+                . $activity->cmid . ': ' . $e->getMessage());
 
             // Back to how it was: the old copy, still carrying the identity.
-            self::remove_partial($cm, $payload->modname);
+            self::remove_partial($cm, $payload->modname, $result);
 
             if ($DB->record_exists('course_modules', ['id' => $existingcmid, 'deletioninprogress' => 0])) {
                 copy_update::set_identity($existingcmid, $idnumber);
@@ -841,10 +854,10 @@ class syncer {
             );
             $name = copy_update::name_as_copy((int) $cm->id);
         } catch (\Throwable $e) {
-            debugging('block_coursesync: could not copy ' . $payload->modname . ' from remote cmid '
-                . $activity->cmid . ' beside an activity already here: ' . $e->getMessage(), DEBUG_DEVELOPER);
+            $result->add_diagnostic('block_coursesync: could not copy ' . $payload->modname . ' from remote cmid '
+                . $activity->cmid . ' beside an activity already here: ' . $e->getMessage());
 
-            self::remove_partial($cm, $payload->modname);
+            self::remove_partial($cm, $payload->modname, $result);
             $result->add_failed($activity->name, $activity->modname, $activity->cmid, 'errorcreatefailed');
 
             return;
@@ -905,8 +918,8 @@ class syncer {
         try {
             $handler->update_in_place($DB->get_record('course_modules', ['id' => $existingcmid], '*', MUST_EXIST), $payload);
         } catch (\Throwable $e) {
-            debugging('block_coursesync: could not update ' . $payload->modname . ' from remote cmid '
-                . $activity->cmid . ' in place: ' . $e->getMessage(), DEBUG_DEVELOPER);
+            $result->add_diagnostic('block_coursesync: could not update ' . $payload->modname . ' from remote cmid '
+                . $activity->cmid . ' in place: ' . $e->getMessage());
 
             $result->add_failed($activity->name, $activity->modname, $activity->cmid, 'errorupdatefailed');
 
@@ -975,6 +988,15 @@ class syncer {
 
         $cm = null;
 
+        // A copy that failed part way before this fix could leave a course
+        // module with no instance and this identity. It is nothing, so it goes
+        // before the activity is made again.
+        if ($idnumber !== '') {
+            self::remove_unfinished((int) $course->id, 0, $idnumber, $payload->modname, $result, true);
+        }
+
+        $lastcmid = self::last_module_id((int) $course->id);
+
         try {
             $cm = $handler->create_from_remote_data($course, $payload, $idnumber);
 
@@ -987,14 +1009,18 @@ class syncer {
             // Anything an activity can only finish once its files are here.
             $handler->post_files($cm, $payload);
         } catch (\Throwable $e) {
-            debugging('block_coursesync: could not create ' . $payload->modname . ' from remote cmid '
-                . $activity->cmid . ': ' . $e->getMessage(), DEBUG_DEVELOPER);
+            $result->add_diagnostic('block_coursesync: could not create ' . $payload->modname . ' from remote cmid '
+                . $activity->cmid . ': ' . $e->getMessage());
 
             // An activity whose files did not arrive is worse than no activity
             // at all, because the next run would see it as already synced and
             // never fix it. Take it back out.
             if ($cm !== null) {
-                self::remove_partial($cm, $payload->modname);
+                self::remove_partial($cm, $payload->modname, $result);
+            } else {
+                // The handler failed before it could say what it had made, so
+                // anything it left behind is found and taken out here.
+                self::remove_unfinished((int) $course->id, $lastcmid, $idnumber, $payload->modname, $result);
             }
 
             $reason = $e instanceof \moodle_exception && get_string_manager()
@@ -1057,20 +1083,110 @@ class syncer {
      *
      * @param \stdClass $cm the course module that was created
      * @param string $modname
+     * @param sync_result $result collects the developer message if this fails too
      * @return void
      */
-    protected static function remove_partial(\stdClass $cm, string $modname): void {
+    protected static function remove_partial(\stdClass $cm, string $modname, sync_result $result): void {
         global $CFG;
 
         require_once($CFG->dirroot . '/course/lib.php');
 
         try {
-            \course_delete_module($cm->id, false);
+            compat::delete_module((int) $cm->id, false);
         } catch (\Throwable $e) {
-            debugging(
-                'block_coursesync: could not clean up a failed ' . $modname . ': ' . $e->getMessage(),
-                DEBUG_DEVELOPER
+            $result->add_diagnostic(
+                'block_coursesync: could not clean up a failed ' . $modname . ': ' . $e->getMessage()
             );
+        }
+    }
+
+    /**
+     * The highest course module id in a course, before an activity is made.
+     *
+     * @param int $courseid
+     * @return int 0 for a course with no activities
+     */
+    protected static function last_module_id(int $courseid): int {
+        global $DB;
+
+        return (int) $DB->get_field_sql('SELECT MAX(id) FROM {course_modules} WHERE course = ?', [$courseid]);
+    }
+
+    /**
+     * Take out what a handler left behind when it failed part way.
+     *
+     * A handler adds the course module first, with no instance and the
+     * activity's sync identity, and fills it in afterwards. One that fails in
+     * between leaves a course module that is nothing, but that carries the
+     * identity: every later run would see the activity as already here and
+     * never bring it. Only course modules made since $lastcmid are touched, and
+     * of those only ones with no instance or with this activity's identity, so
+     * an activity someone else added meanwhile is left alone.
+     *
+     * @param int $courseid
+     * @param int $lastcmid the highest course module id before the handler ran
+     * @param string $idnumber the identity the new activity was given, or ''
+     * @param string $modname
+     * @param sync_result $result collects the developer message if this fails too
+     * @param bool $emptyonly only course modules with no instance and this identity
+     * @return void
+     */
+    protected static function remove_unfinished(
+        int $courseid,
+        int $lastcmid,
+        string $idnumber,
+        string $modname,
+        sync_result $result,
+        bool $emptyonly = false
+    ): void {
+        global $CFG, $DB;
+
+        require_once($CFG->dirroot . '/course/lib.php');
+
+        $params = ['course' => $courseid, 'lastcmid' => $lastcmid, 'noinstance' => 0];
+
+        if ($emptyonly) {
+            $where = 'course = :course AND id > :lastcmid AND instance = :noinstance AND idnumber = :idnumber';
+            $params['idnumber'] = $idnumber;
+        } else if ($idnumber !== '') {
+            $where = 'course = :course AND id > :lastcmid AND (instance = :noinstance OR idnumber = :idnumber)';
+            $params['idnumber'] = $idnumber;
+        } else {
+            $where = 'course = :course AND id > :lastcmid AND instance = :noinstance';
+        }
+
+        $leftovers = $DB->get_records_select(
+            'course_modules',
+            $where,
+            $params,
+            'id',
+            'id, instance, section'
+        );
+
+        foreach ($leftovers as $leftover) {
+            try {
+                if ((int) $leftover->instance > 0) {
+                    compat::delete_module((int) $leftover->id, false);
+                } else {
+                    // No instance, so nothing for compat::delete_module() to
+                    // find: only the row, its context and any section entry.
+                    \context_helper::delete_instance(CONTEXT_MODULE, (int) $leftover->id);
+
+                    if ((int) $leftover->section > 0) {
+                        \delete_mod_from_section($leftover->id, $leftover->section);
+                    }
+
+                    $DB->delete_records('course_modules', ['id' => $leftover->id]);
+                }
+            } catch (\Throwable $e) {
+                $result->add_diagnostic(
+                    'block_coursesync: could not clean up a failed ' . $modname . ': ' . $e->getMessage()
+                );
+            }
+        }
+
+        if ($leftovers) {
+            \rebuild_course_cache($courseid, true);
         }
     }
 }

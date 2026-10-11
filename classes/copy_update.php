@@ -233,7 +233,30 @@ class copy_update {
         // Moving needs the module as modinfo knows it (its type, current
         // section and visibility), not just its row.
         \rebuild_course_cache($old->course, true);
-        \moveto_module(get_fast_modinfo($old->course)->get_cm($new->id), $section, $beforemod);
+
+        // A type that is never shown on the course page (a question bank, say)
+        // lives in section 0, where its place means nothing, so it is not
+        // moved. Moodle 5.2's cmactions::move_before() would refuse anyway: it
+        // compares the section id, not the section number, with 0, and so
+        // throws for such a module wherever it is.
+        $movable = \course_modinfo::is_mod_type_visible_on_course(
+            get_fast_modinfo($old->course)->get_cm($new->id)->modname
+        );
+
+        if ($movable && method_exists(\core_courseformat\local\cmactions::class, 'move_before')) {
+            // Moodle 5.2 and later, which deprecated moveto_module().
+            $actions = \core_courseformat\formatactions::cm((int) $old->course);
+
+            if ($beforemod) {
+                $actions->move_before((int) $new->id, (int) $beforemod->id);
+            } else {
+                $actions->move_end_section((int) $new->id, (int) $section->id);
+            }
+
+            \course_modinfo::purge_course_module_cache($old->course, $new->id);
+        } else if ($movable) {
+            \moveto_module(get_fast_modinfo($old->course)->get_cm($new->id), $section, $beforemod);
+        }
 
         $update = (object) ['id' => $new->id];
 
