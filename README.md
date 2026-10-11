@@ -65,18 +65,18 @@ is configured.
 
 ## Requirements
 
-* Moodle 5.1 (2025100600 or later)
-* PHP 8.2+
+* Moodle 5.1, 5.2 or 5.3 (2025100600 or later)
+* PHP 8.2+ (8.3+ on Moodle 5.2 and 5.3, which require it)
 * HTTPS on the source site. The destination refuses to store a plain `http://`
   address, so a token can never be sent unencrypted.
 
 ## Installation
 
-Copy this directory to `public/blocks/coursesync` in your Moodle 5.1 docroot on
+Copy this directory to `public/blocks/coursesync` in your Moodle docroot on
 both sites, then run the upgrade on each:
 
 ```bash
-php public/admin/cli/upgrade.php --non-interactive
+php admin/cli/upgrade.php --non-interactive
 ```
 
 ## Setting up a connection

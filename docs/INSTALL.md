@@ -22,7 +22,9 @@ configured.
 
 ## Before you start
 
-- Moodle 5.1 (2025100600) or later on both sites, and PHP 8.2 or later.
+- Moodle 5.1, 5.2 or 5.3 (2025100600 or later) on both sites, with the PHP that
+  version requires (8.2 or later on 5.1, 8.3 or later on 5.2 and 5.3). The two
+  sites do not need to run the same Moodle version.
 - **The source site must be reachable over HTTPS with a valid certificate.**
   Course Sync refuses plain `http`, because the access token would travel in
   clear text.
@@ -37,8 +39,11 @@ Copy the plugin directory to `public/blocks/coursesync` in each site's Moodle
 directory, then run the upgrade:
 
 ```bash
-php public/admin/cli/upgrade.php --non-interactive
+php admin/cli/upgrade.php --non-interactive
 ```
+
+(Run it from the Moodle root: the command-line scripts stay in `admin/cli`, not
+under `public/`.)
 
 Or install the ZIP through *Site administration → Plugins → Install plugins* on
 each site.

@@ -7,6 +7,48 @@ Builds before v1.3.0 predate the git history. v1.14.0 was a real build but was
 never committed on its own: its changes are in the v1.15.0 commit, so git's
 version file goes from v1.13.0 straight to v1.15.0.
 
+## Unreleased (Moodle 5.2 and 5.3 support; no version assigned yet)
+
+### Fixed
+
+- **Assignments can be copied into Moodle 5.2 and 5.3.** Copying one failed with
+  "Undefined constant ASSIGN_ATTEMPT_REOPEN_METHOD_NONE", which Moodle 5.2 removed.
+  "Never reopen" from a 5.1 source now becomes "until pass" with one attempt, as
+  Moodle's own 5.2 upgrade does. "Automatically" is now kept instead of becoming
+  "never".
+- **A copy that fails part way no longer leaves an empty activity behind.** The
+  course module a failed copy had already added stayed in the course, with no
+  activity in it but with the sync identity, so every later run took the activity
+  as already copied and never brought it. It is now taken out, a course module
+  with no activity never counts as a copy, and one left by an earlier version is
+  cleared the next time the activity is copied.
+- **Quiz attempts are pulled for quizzes with random questions on Moodle 5.2 and
+  5.3.** Moodle 5.2 changed how a random slot's question type is reported, so every
+  such quiz was refused as "no longer matches the one on the other site". Random
+  slots now match whichever version each site runs.
+- **A question bank can be re-copied on Moodle 5.2 and 5.3.** Replacing one failed
+  with "Modules with FEATURE_CAN_DISPLAY set to false can not be moved from section
+  0": Moodle 5.2's `cmactions::move_before()` compares the section id with 0. A type
+  never shown on the course page now keeps its place in section 0 and is not moved.
+- **One activity failing no longer cuts a sync short on a site showing developer
+  messages.** The message about the failure is now given once the run is in the
+  history, so the run still finishes and its copies stay recognised as Course
+  Sync's own.
+- Moving a re-copied activity into place and deleting a replaced or half-made one
+  use Moodle 5.2's course format actions instead of the deprecated `moveto_module()`
+  and `course_delete_module()` (5.1 keeps the old calls). Deletion goes through the
+  new `local\compat::delete_module()`.
+
+### Changed
+
+- `$plugin->supported` is now 5.1 to 5.3, and CI tests `MOODLE_501_STABLE`,
+  `MOODLE_502_STABLE` and `MOODLE_503_STABLE`, each on PHP 8.4 with PostgreSQL and
+  MariaDB.
+- The README and INSTALL.md give the upgrade command as `php admin/cli/upgrade.php`
+  (the command-line scripts are not under `public/`).
+- A Behat step adds a quiz's random slot, since neither core step can on both 5.1
+  and 5.2+.
+
 ## Unreleased (build 2026101008, v1.23.6-beta)
 
 ### Security
