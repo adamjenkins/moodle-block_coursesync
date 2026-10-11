@@ -22,16 +22,15 @@ Feature: Syncing quiz questions
       | questioncategory | qtype       | name               | questiontext                 |
       | Quiz pool         | truefalse   | River question     | The Nile flows north.        |
       | Quiz pool         | shortanswer | Capital question   | What is the capital of Peru? |
-      | Quiz pool         | random      | Random (Quiz pool) | 0                             |
-    # The core step below only applies a custom "maxmark" to a fixed slot -
-    # for a random one it is silently ignored, so the random slot below
-    # keeps the engine's own default of 1.00. That default travelling
-    # across correctly is still a real proof that per-slot marks are read
-    # from the actual source value, not hardcoded on the way in.
+    # The random slot is added by a step of this plugin (core's steps cannot
+    # make one on both Moodle 5.1 and 5.2+), with the engine's own default
+    # mark of 1.00. That default travelling across correctly is still a real
+    # proof that per-slot marks are read from the actual source value, not
+    # hardcoded on the way in.
     And quiz "Unit quiz" contains the following questions:
       | question            | page | maxmark |
       | River question       | 1    | 2.0     |
-      | Random (Quiz pool)   | 2    |         |
+    And quiz "Unit quiz" has a random question from category "Quiz pool" on page "2"
     And the following "users" exist:
       | username | firstname | lastname | email                |
       | teacher1 | Tina      | Teacher  | teacher1@example.com |

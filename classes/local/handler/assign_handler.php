@@ -17,6 +17,7 @@
 namespace block_coursesync\local\handler;
 
 use block_coursesync\activity_payload;
+use block_coursesync\local\compat;
 
 /**
  * Handles mod_assign: the assignment's settings, not its submissions.
@@ -158,6 +159,14 @@ class assign_handler extends activity_handler {
         }
 
         $data->attemptreopenmethod = self::clean_reopen_method($payload->setting('attemptreopenmethod'));
+
+        // Moodle 5.2 removed "never reopen" ('none'), and its upgrade turned it
+        // into "until pass" with a single attempt. A source on 5.1 can still
+        // send 'none', so it gets the same treatment here: the copy still
+        // never allows a second attempt.
+        if ($data->attemptreopenmethod !== $payload->setting('attemptreopenmethod')) {
+            $data->maxattempts = 1;
+        }
         $data->grade = self::resolve_scale(
             $payload->setting_int('grade', 0),
             $payload->setting('gradescalename')
@@ -211,7 +220,7 @@ class assign_handler extends activity_handler {
             $this->restore_plugin_config((int) $instanceid, $cmid, $payload);
         } catch (\Throwable $e) {
             require_once($CFG->dirroot . '/course/lib.php');
-            \course_delete_module($cm->id, false);
+            compat::delete_module((int) $cm->id, false);
 
             throw new \moodle_exception('errorcreatefailed', 'block_coursesync');
         }
@@ -232,17 +241,21 @@ class assign_handler extends activity_handler {
     /**
      * Keep the reopen method to one this site recognises.
      *
+     * Anything else - 'none', which Moodle 5.2 removed, or a value this site
+     * does not know - becomes "until pass", the default since 5.1. The caller
+     * limits the copy to one attempt when that happens.
+     *
      * @param string $method what the source site sent
      * @return string
      */
     protected static function clean_reopen_method(string $method): string {
         $known = [
-            ASSIGN_ATTEMPT_REOPEN_METHOD_NONE,
             ASSIGN_ATTEMPT_REOPEN_METHOD_MANUAL,
+            ASSIGN_ATTEMPT_REOPEN_METHOD_AUTOMATIC,
             ASSIGN_ATTEMPT_REOPEN_METHOD_UNTILPASS,
         ];
 
-        return in_array($method, $known, true) ? $method : ASSIGN_ATTEMPT_REOPEN_METHOD_NONE;
+        return in_array($method, $known, true) ? $method : ASSIGN_ATTEMPT_REOPEN_METHOD_UNTILPASS;
     }
 
     /**

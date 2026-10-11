@@ -379,7 +379,7 @@ class attempt_pull {
                 !$slot
                 || grade_floats_different((float) $slot->maxmark, $remoteslot->maxmark)
                 || $slot->qtype === 'missingtype'
-                || $slot->qtype !== $remoteslot->qtype
+                || self::slot_type($slot->qtype, !empty($slot->random)) !== self::slot_type($remoteslot->qtype, false)
             ) {
                 return 'attemptskipchanged';
             }
@@ -390,6 +390,26 @@ class attempt_pull {
         }
 
         return null;
+    }
+
+    /**
+     * What kind of question a slot holds, said the same way on every Moodle.
+     *
+     * A random slot has no question type of its own. Moodle 5.1 calls it
+     * 'random'; from 5.2 the type is null and the slot is flagged random
+     * instead, which a source on 5.2 or later sent as ''. All three mean the
+     * same slot here.
+     *
+     * @param string|null $qtype the slot's question type, as given
+     * @param bool $random whether the slot is flagged as random
+     * @return string the question type, or 'random'
+     */
+    public static function slot_type(?string $qtype, bool $random): string {
+        if ($random || $qtype === null || $qtype === '' || $qtype === 'random') {
+            return 'random';
+        }
+
+        return $qtype;
     }
 
     /**

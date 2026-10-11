@@ -45,6 +45,9 @@ class sync_result {
     /** @var int The history row this run was written to. */
     public int $runid = 0;
 
+    /** @var string[] What went wrong, for developers, said once the run is over. */
+    public array $diagnostics = [];
+
     /**
      * The run could not start or could not finish.
      *
@@ -214,6 +217,20 @@ class sync_result {
             'notes' => $notes,
             'detail' => $reasonkey,
         ];
+    }
+
+    /**
+     * Keep a developer message about this run until the run is over.
+     *
+     * Saying it straight away through debugging() can end the request on a
+     * site that shows developer messages - before the run is written to the
+     * history and before a half-made activity is taken back out.
+     *
+     * @param string $message
+     * @return void
+     */
+    public function add_diagnostic(string $message): void {
+        $this->diagnostics[] = $message;
     }
 
     /**

@@ -23,6 +23,7 @@ use GuzzleHttp\Psr7\Response;
 use mod_quiz\quiz_attempt;
 use mod_quiz\quiz_settings;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 defined('MOODLE_INTERNAL') || die();
 
@@ -482,5 +483,32 @@ final class attempt_pull_test extends advanced_testcase {
      */
     protected function source_saying(array $body): http_client {
         return new http_client(['mock' => fn() => Create::promiseFor(new Response(200, [], json_encode($body)))]);
+    }
+
+    /**
+     * A random slot is the same slot whichever Moodle version describes it.
+     *
+     * @param string|null $qtype the slot's question type, as given
+     * @param bool $random whether the slot is flagged random
+     * @param string $expected
+     */
+    #[DataProvider('slot_type_provider')]
+    public function test_slot_type(?string $qtype, bool $random, string $expected): void {
+        $this->assertSame($expected, attempt_pull::slot_type($qtype, $random));
+    }
+
+    /**
+     * Slot descriptions from Moodle 5.1, from 5.2 and later, and from sources of either.
+     *
+     * @return array
+     */
+    public static function slot_type_provider(): array {
+        return [
+            'random on Moodle 5.1' => ['random', false, 'random'],
+            'random on Moodle 5.2 and later' => [null, true, 'random'],
+            'random sent by a 5.2 source before this fix' => ['', false, 'random'],
+            'a real question' => ['shortanswer', false, 'shortanswer'],
+            'a missing question type stays missing' => ['missingtype', false, 'missingtype'],
+        ];
     }
 }
